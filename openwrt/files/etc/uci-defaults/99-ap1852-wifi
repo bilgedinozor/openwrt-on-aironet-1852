@@ -1,0 +1,48 @@
+#!/bin/sh
+# First-boot defaults for the AP1852 so it's usable out of the box (runs once,
+# then deletes itself). The device already boots as a normal OpenWrt router
+# (LAN 192.168.1.1 + DHCP + LuCI); this additionally brings up a 2.4 GHz Wi-Fi
+# AP bridged into that LAN.
+#
+# EDIT the three values below for your site. Wi-Fi stays OFF until you set BOTH a
+# COUNTRY (regulatory requirement) and a KEY (>=8 chars) — no insecure or
+# wrong-region default is shipped. With them set, Wi-Fi is on at first power-up.
+#
+# ---- EDIT THESE ----
+COUNTRY=""                 # e.g. TR, DE, US  (empty = leave Wi-Fi disabled)
+SSID="OpenWrt-AP1852"
+KEY=""                     # WPA2 passphrase, >=8 chars  (empty = leave Wi-Fi disabled)
+# --------------------
+
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "cisco,ap1852" ] || exit 0
+
+# a friendly hostname, always
+uci -q set system.@system[0].hostname='ap1852'
+uci -q commit system
+
+# make sure a wireless config exists (generated from the detected radios)
+[ -f /etc/config/wireless ] || wifi config 2>/dev/null
+
+# only bring the radio up if the operator supplied a country AND a key
+if [ -n "$COUNTRY" ] && [ "${#KEY}" -ge 8 ]; then
+	uci -q batch <<EOF
+set wireless.radio0.disabled='0'
+set wireless.radio0.country='$COUNTRY'
+set wireless.radio0.channel='1'
+set wireless.radio0.htmode='HT20'
+set wireless.radio0.txpower='17'
+set wireless.radio0.cell_density='0'
+set wireless.default_radio0.mode='ap'
+set wireless.default_radio0.ssid='$SSID'
+set wireless.default_radio0.encryption='psk2'
+set wireless.default_radio0.key='$KEY'
+set wireless.default_radio0.network='lan'
+set wireless.radio1.disabled='1'
+EOF
+	uci -q commit wireless
+	logger -t ap1852 "first-boot: 2.4 GHz AP '$SSID' enabled (country $COUNTRY)"
+else
+	logger -t ap1852 "first-boot: Wi-Fi left disabled — set COUNTRY and KEY in 99-ap1852-wifi before building, or configure it in LuCI."
+fi
+
+exit 0

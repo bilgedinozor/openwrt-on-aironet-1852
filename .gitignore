@@ -1,0 +1,24 @@
+# --- never commit secrets ---
+*.pem
+*.key
+signing_key*
+
+# --- never commit firmware images / blobs / backups ---
+*.bin
+*.itb
+*.img
+*.ubi
+*.ubifs
+*.mbn
+board.bin
+cisco-stock-part.bin
+dumps/
+out/
+tftp/
+
+# --- build / runtime noise ---
+logs/
+*.log
+__pycache__/
+*.pyc
+.DS_Store

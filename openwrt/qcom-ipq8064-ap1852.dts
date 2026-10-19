@@ -1,0 +1,330 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/*
+ * Cisco AIR-AP1852I (board "CORSICA", machid 0x1260)
+ *
+ * IPQ8064, 1 GiB DDR, 256 MiB NAND (Micron MT29F2G08), 4 MiB SPI NOR
+ * (Macronix MX25U3235F, holds the Qualcomm/Cisco boot chain), console on
+ * GSBI4 UART at 9600 baud, two AR8033 PHYs on GMAC2/GMAC3 via SGMII
+ * (MDIO addresses 1 and 2, no switch). Values taken from the stock
+ * bootloader's board table and the SMEM partition table.
+ *
+ * The radios sit on PCIe and are dead on these units, so PCIe stays disabled
+ * (as in the dtsi). SPI NOR (boot chain + Cisco env/MFG data) is read-only.
+ *
+ * LEDs/button: GPIO numbers from Cisco's led_module.ko (board_leddata) and
+ * a live read of the TLMM input levels while pressing the button.
+ */
+
+#include "qcom-ipq8064-v1.0.dtsi"
+
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	model = "Cisco AIR-AP1852I";
+	compatible = "cisco,ap1852", "qcom,ipq8064";
+
+	/*
+	 * The v1.0 dtsi describes reference-board LEDs (GPIO 7/8/9/26/53) and
+	 * buttons (GPIO 54/65); none of them exist on the AP1852.
+	 */
+	soc {
+		/delete-node/ leds;
+		/delete-node/ gpio-keys;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-0 = <&ap1852_led_pins>;
+		pinctrl-names = "default";
+
+		led_status_red: led-0 {
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_STATUS;
+			gpios = <&qcom_pinmux 22 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_status_green: led-1 {
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_STATUS;
+			gpios = <&qcom_pinmux 23 GPIO_ACTIVE_HIGH>;
+			/* lit by the bootloader; keep it on until OpenWrt takes over */
+			default-state = "keep";
+		};
+
+		led_status_amber: led-2 {
+			color = <LED_COLOR_ID_AMBER>;
+			function = LED_FUNCTION_STATUS;
+			gpios = <&qcom_pinmux 26 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&ap1852_button_pins>;
+		pinctrl-names = "default";
+
+		/* front "Mode" button */
+		button-reset {
+			label = "reset";
+			gpios = <&qcom_pinmux 24 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+			debounce-interval = <60>;
+		};
+	};
+
+	memory@0 {
+		reg = <0x42000000 0x3e000000>;
+		device_type = "memory";
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		rsvd@41200000 {
+			reg = <0x41200000 0x300000>;
+			no-map;
+		};
+	};
+
+	aliases {
+		serial0 = &gsbi4_serial;
+		mdio-gpio0 = &mdio0;
+		ethernet0 = &gmac2;
+		ethernet1 = &gmac3;
+		led-boot = &led_status_amber;
+		led-failsafe = &led_status_red;
+		led-running = &led_status_green;
+		led-upgrade = &led_status_amber;
+	};
+
+	chosen {
+		stdout-path = "serial0:9600n8";
+	};
+};
+
+&adm_dma {
+	status = "okay";
+};
+
+&flash {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Same layout as the SMEM table; all read-only. */
+		partition@0 { label = "0:sbl1"; reg = <0x000000 0x010000>; read-only; };
+		partition@10000 { label = "0:mibib"; reg = <0x010000 0x020000>; read-only; };
+		partition@30000 { label = "0:sbl2"; reg = <0x030000 0x030000>; read-only; };
+		partition@60000 { label = "0:sbl3"; reg = <0x060000 0x030000>; read-only; };
+		partition@90000 { label = "0:ddrconfig"; reg = <0x090000 0x010000>; read-only; };
+		partition@a0000 { label = "0:tz"; reg = <0x0a0000 0x030000>; read-only; };
+		partition@d0000 { label = "0:rpm"; reg = <0x0d0000 0x020000>; read-only; };
+		partition@f0000 { label = "0:appsbl"; reg = <0x0f0000 0x070000>; read-only; };
+		partition@160000 { label = "0:bootinf"; reg = <0x160000 0x010000>; read-only; };
+		partition@170000 { label = "0:appsblenv"; reg = <0x170000 0x010000>; read-only; };
+		partition@180000 { label = "0:art"; reg = <0x180000 0x040000>; read-only; };
+		partition@1c0000 { label = "0:shareenv"; reg = <0x1c0000 0x010000>; read-only; };
+		partition@1d0000 { label = "0:bootalt"; reg = <0x1d0000 0x170000>; read-only; };
+		partition@340000 { label = "0:reserved1"; reg = <0x340000 0x070000>; read-only; };
+		partition@3b0000 { label = "0:iosdata"; reg = <0x3b0000 0x040000>; read-only; };
+		/* Cisco MFG data: serial at 0x2007, base MAC at 0x201a (block of 8) */
+		partition@3f0000 {
+			label = "0:vendordata";
+			reg = <0x3f0000 0x010000>;
+			read-only;
+
+			nvmem-layout {
+				compatible = "fixed-layout";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				macaddr_vendordata_201a: macaddr@201a {
+					compatible = "mac-base";
+					reg = <0x201a 0x6>;
+					#nvmem-cell-cells = <1>;
+				};
+			};
+		};
+	};
+};
+
+&nand {
+	status = "okay";
+
+	nand@0 {
+		reg = <0>;
+		compatible = "qcom,nandcs";
+
+		nand-ecc-strength = <4>;
+		nand-bus-width = <8>;
+		nand-ecc-step-size = <512>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			/*
+			 * Whole NAND is one UBI device shared with the stock firmware:
+			 * Cisco keeps its volumes part1/part2, OpenWrt adds kernel,
+			 * rootfs, rootfs_data (and owrt_uboot) in the free space.
+			 * Never ubiformat this partition (see INSTALL_PLAN.md).
+			 */
+			partition@0 {
+				label = "ubi";
+				reg = <0x0 0x10000000>;
+			};
+		};
+	};
+};
+
+&hs_phy_0 {
+	status = "okay";
+};
+
+&ss_phy_0 {
+	status = "okay";
+};
+
+&usb3_0 {
+	status = "okay";
+};
+
+&hs_phy_1 {
+	status = "okay";
+};
+
+&ss_phy_1 {
+	status = "okay";
+};
+
+&usb3_1 {
+	status = "okay";
+};
+
+&mdio0 {
+	status = "okay";
+
+	pinctrl-0 = <&mdio0_pins>;
+	pinctrl-names = "default";
+
+	phy1: ethernet-phy@1 {
+		reg = <1>;
+	};
+
+	phy2: ethernet-phy@2 {
+		reg = <2>;
+	};
+};
+
+/* PoE / main port (stock U-Boot "Port:2") */
+&gmac2 {
+	status = "okay";
+	phy-mode = "sgmii";
+	qcom,id = <2>;
+	phy-handle = <&phy1>;
+
+	nvmem-cells = <&macaddr_vendordata_201a 0>;
+	nvmem-cell-names = "mac-address";
+};
+
+/* AUX port */
+&gmac3 {
+	status = "okay";
+	phy-mode = "sgmii";
+	qcom,id = <3>;
+	phy-handle = <&phy2>;
+
+	nvmem-cells = <&macaddr_vendordata_201a 1>;
+	nvmem-cell-names = "mac-address";
+};
+
+/*
+ * SMB208 PMIC via RPM, as on AP148 (Cisco's kernel lists smb208_s1a..s6b).
+ * Same rails/values as qcom-ipq8064-smb208.dtsi, inlined because that file
+ * re-includes qcom-ipq8064.dtsi. Without l2-supply the krait cache-scaling
+ * driver fails and L2 stays at 384 MHz, which caps routing at ~300 Mbit/s.
+ */
+&cpu0 {
+	cpu-supply = <&smb208_s2a>;
+};
+
+&cpu1 {
+	cpu-supply = <&smb208_s2b>;
+};
+
+&L2 {
+	l2-supply = <&smb208_s1a>;
+};
+
+&rpm {
+	smb208_regulators: regulators {
+		compatible = "qcom,rpm-smb208-regulators";
+
+		smb208_s1a: s1a {
+			regulator-min-microvolt = <1050000>;
+			regulator-max-microvolt = <1150000>;
+
+			qcom,switch-mode-frequency = <1200000>;
+		};
+
+		smb208_s1b: s1b {
+			regulator-min-microvolt = <1050000>;
+			regulator-max-microvolt = <1150000>;
+
+			qcom,switch-mode-frequency = <1200000>;
+		};
+
+		smb208_s2a: s2a {
+			regulator-min-microvolt = < 800000>;
+			regulator-max-microvolt = <1250000>;
+
+			qcom,switch-mode-frequency = <1200000>;
+		};
+
+		smb208_s2b: s2b {
+			regulator-min-microvolt = < 800000>;
+			regulator-max-microvolt = <1250000>;
+
+			qcom,switch-mode-frequency = <1200000>;
+		};
+	};
+};
+
+&qcom_pinmux {
+	ap1852_led_pins: ap1852-led-pins {
+		mux {
+			pins = "gpio22", "gpio23", "gpio26";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+
+	ap1852_button_pins: ap1852-button-pins {
+		mux {
+			pins = "gpio24";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+	};
+};
+
+/*
+ * PCIe — the two mini-PCIe radio slots. Base qcom-ipq8064.dtsi defines
+ * pcie0@1b500000 and pcie1@1b700000 (disabled); enabling them lets a
+ * substitute mini-PCIe Wi-Fi card (e.g. an iwlwifi/ath9k/ath10k card) in a
+ * slot enumerate. Harmless on units with no card (link just never comes up).
+ */
+&pcie0 {
+	status = "okay";
+};
+
+&pcie1 {
+	status = "okay";
+	max-link-speed = <1>;
+};

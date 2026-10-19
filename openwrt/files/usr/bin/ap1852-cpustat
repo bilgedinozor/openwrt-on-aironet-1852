@@ -1,0 +1,18 @@
+#!/bin/sh
+# Per-core CPU usage from /proc/stat deltas: idle% and softirq% for cpu0/cpu1.
+# Usage: sh cpustat.sh [samples] [interval_s]   (writes to stdout)
+n=${1:-60}; t=${2:-2}
+snap() { grep -E '^cpu[01] ' /proc/stat; }
+prev=$(snap)
+i=0
+while [ $i -lt $n ]; do
+	sleep $t
+	cur=$(snap)
+	printf '%s\n%s\n' "$prev" "$cur" | awk '
+		{ tot=0; for (f=2; f<=NF; f++) tot+=$f; key=$1 }
+		seen[key]++ == 0 { pt[key]=tot; pi[key]=$5; ps[key]=$8; next }
+		{ dt=tot-pt[key]; if (dt<1) dt=1
+		  printf "%s idle %3d%% sirq %3d%%  ", key, 100*($5-pi[key])/dt, 100*($8-ps[key])/dt }
+		END { printf "\n" }'
+	prev=$cur; i=$((i + 1))
+done
